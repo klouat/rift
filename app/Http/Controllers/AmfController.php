@@ -45,6 +45,11 @@ class AmfController extends Controller
                 'ValentineEvent2026' => \App\Services\ValentineEvent2026Service::class,
                 'HanamiEvent2026'    => \App\Services\HanamiEvent2026Service::class,
                 'MaterialMarket'     => \App\Services\MaterialMarketService::class,
+                'Blacksmith'         => \App\Services\BlacksmithService::class,
+                'BlacksmithLightning'=> \App\Services\BlacksmithService::class,
+                'WishingTree'        => \App\Services\WishingTreeService::class,
+                'DailyRoulette'      => \App\Services\DailyRoulette::class,
+                'BlackMerchant'      => \App\Services\BlackMerchant::class,
             ];
 
 

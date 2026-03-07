@@ -7,13 +7,19 @@ use Illuminate\Support\Facades\Log;
 
 class BattleSystem
 {
+    use \App\Traits\SessionValidator;
+    use \App\Traits\LevelManager;
+
     /**
      * Validates the incoming battle request and returns a 10-char battle code.
      * The client checks: if (param1.length != 10) → abort.
      * So we MUST return exactly a 10-character string.
      */
-    public function startMission($char_id, $mission_id, $enemy_ids, $enemy_stats, $agility, $hash, $sessionkey): string
+    public function startMission($char_id, $mission_id, $enemy_ids, $enemy_stats, $agility, $hash, $sessionkey)
     {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
         return substr(md5(uniqid($char_id . $mission_id, true)), 0, 10);
     }
 
@@ -31,32 +37,56 @@ class BattleSystem
      */
     public function finishMission($char_id, $mission_id, $battle_code, $hash, $total_damage, $sessionkey): array
     {
-        $char = Character::find((int) $char_id);
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
 
-        if (!$char) {
-            return ['status' => 0, 'error' => 1, 'result' => 'Character not found.'];
-        }
-
+        // Default rewards if mission not found
         $xp_gain   = 300;
         $gold_gain = 50;
+        $tp_gain   = 0;
+        $rewards   = [];
 
-        $new_xp    = (int) $char->xp + $xp_gain;
-        $level_up  = false;
-        $new_level = (int) $char->level;
-
-        // Simple XP threshold: 500 * level per level
-        $xp_needed = $new_level * 500;
-        if ($new_xp >= $xp_needed && $new_level < 100) {
-            $new_xp   -= $xp_needed;
-            $new_level++;
-            $level_up  = true;
+        $libPath = base_path('missionLibrary.json');
+        if (file_exists($libPath)) {
+            $lib = json_decode(file_get_contents($libPath), true);
+            $missions = $lib['savedMissionLibrary'] ?? [];
+            foreach ($missions as $m) {
+                if (($m['item_id'] ?? '') == $mission_id) {
+                    $effects    = $m['effects'] ?? [];
+                    $xp_gain    = (int) ($effects['msn_reward_xp'] ?? $xp_gain);
+                    $gold_gain  = (int) ($effects['msn_reward_gold'] ?? $gold_gain);
+                    $tp_gain    = (int) ($effects['msn_reward_tp'] ?? 0);
+                    $rewards    = $effects['msn_rewards'] ?? [];
+                    break;
+                }
+            }
         }
 
-        $char->update([
-            'xp'    => $new_xp,
-            'level' => $new_level,
-            'gold'  => (int) $char->gold + $gold_gain,
-        ]);
+        $awards = $this->awardXp($char, $xp_gain);
+        $new_xp = $awards['xp'];
+        $new_level = $awards['level'];
+        $level_up = $awards['level_up'];
+        $actual_xp_gain = $awards['xp_gain'];
+
+        $char->xp    = $new_xp;
+        $char->level = $new_level;
+        $char->gold  = (int) $char->gold + $gold_gain;
+        $char->tp    = (int) ($char->tp ?? 0) + $tp_gain;
+        $char->save();
+
+        // Process item rewards
+        foreach ($rewards as $reward_id) {
+            $column = 'char_items'; // fallback
+            if (str_starts_with($reward_id, 'essential_')) $column = 'char_essentials';
+            else if (str_starts_with($reward_id, 'material_')) $column = 'char_materials';
+            else if (str_starts_with($reward_id, 'wpn_')) $column = 'char_weapons';
+            else if (str_starts_with($reward_id, 'back_')) $column = 'char_back_items';
+            else if (str_starts_with($reward_id, 'accessory_')) $column = 'char_accessories';
+            else if (str_starts_with($reward_id, 'set_')) $column = 'char_sets';
+            else if (str_starts_with($reward_id, 'hair_')) $column = 'char_hairs';
+
+            $char->addToInventory($column, $reward_id, 1);
+        }
 
         return [
             'status'         => 1,
@@ -66,9 +96,9 @@ class BattleSystem
             'xp'             => $new_xp,
             'level_up'       => $level_up,
             'result'         => [
-                'xp_'   . $xp_gain,
-                'gold_' . $gold_gain,
-                [],
+                '' . $actual_xp_gain,
+                '' . $gold_gain,
+                $rewards,
                 $level_up,
             ],
         ];

@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class SystemLogin {
+    use \App\Traits\SessionValidator;
 
     public function checkVersion($build_num) {
         return ["status" => 1];
@@ -39,6 +40,8 @@ class SystemLogin {
         }
 
         $sessionkey = md5(time() . Str::random(10) . $username);
+        $user->sessionkey = $sessionkey;
+        $user->save();
 
         return [
             "status"               => 1,
@@ -57,10 +60,14 @@ class SystemLogin {
     }
 
     public function getAllCharacters($account_id, $sessionkey) {
-        $user = User::with('characters')->find($account_id);
+        $user = User::with('characters')->find((int)$account_id);
         
         if (!$user) {
-            return ["status" => 2, "error" => "User not found."]; // 2 usually triggers character creation
+            return ["status" => 2, "error" => "User not found."];
+        }
+
+        if ($user->sessionkey !== $sessionkey) {
+             return ["status" => 2, "result" => "Session mismatch"];
         }
 
         $characters = $user->characters;
@@ -91,11 +98,22 @@ class SystemLogin {
                 'character_talent_1' => $char->char_talent_1 ?? "",
                 'character_talent_2' => $char->char_talent_2 ?? "",
                 'character_talent_3' => $char->char_talent_3 ?? "",
+                'character_hp' => (int) $char->hp,
+                'character_cp' => (int) $char->cp,
+                'character_agility' => (int) $char->agility,
+                'character_dodge' => (int) $char->dodge,
+                'character_critical' => (int) $char->critical,
+                'character_purify' => (int) $char->purify,
                 'character_gold' => $char->gold,
                 'character_tp' => $char->tp,
                 'character_class' => $char->character_class,
                 'character_village_id' => $char->village_id,
-                'character_sets' => $char->char_sets // Will be JSON Decoded natively by DB
+                'character_sets' => [
+                    'hairstyle'  => $char->equipped_hairstyle,
+                    'face'       => 'face_01_' . $char->gender,
+                    'hair_color' => $char->hair_style_color,
+                    'skin_color' => $char->skin_color,
+                ]
             ];
         }
 
@@ -109,9 +127,18 @@ class SystemLogin {
     }
 
     public function getCharacterData($char_id, $sessionkey_or_type, $type="self") {
-        $char = Character::find($char_id);
+        // Handle different call signatures from client
+        $sessionkey = ($type === "self") ? $sessionkey_or_type : null;
+
+        $char = Character::with('user')->find((int)$char_id);
         
-        if ($char) {
+        if (!$char) {
+             return ["status" => 0, "error" => "Character not found."];
+        }
+
+        if ($sessionkey && $char->user->sessionkey !== $sessionkey) {
+             return ["status" => 2, "result" => "Session mismatch"];
+        }
             // Build the massive object that Character.as expects
             return [
                 "status" => 1,
@@ -141,6 +168,12 @@ class SystemLogin {
                     "character_talent_1"   => $char->char_talent_1 ?: null,
                     "character_talent_2"   => $char->char_talent_2 ?: null,
                     "character_talent_3"   => $char->char_talent_3 ?: null,
+                    "character_hp"         => (int) $char->hp,
+                    "character_cp"         => (int) $char->cp,
+                    "character_agility"    => (int) $char->agility,
+                    "character_dodge"      => (int) $char->dodge,
+                    "character_critical"   => (int) $char->critical,
+                    "character_purify"     => (int) $char->purify,
                     "character_gold"       => (string) $char->gold,
                     "character_tp"         => (int) ($char->tp ?? 0),
                     "character_class"      => (string) ($char->character_class ?? ""),
@@ -210,8 +243,5 @@ class SystemLogin {
                     "arena_hash"      => "f35ce247e15061487a28c8836822852ebe13874a032c3800e65e7d9acbb0802a"
                 ]
             ];
-        } else {
-            return ["status" => 0, "error" => "Character not found."];
-        }
     }
 }

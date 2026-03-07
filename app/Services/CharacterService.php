@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\Character;
 
 class CharacterService {
+    use \App\Traits\SessionValidator;
 
     public function characterRegister($data) {
         /**
@@ -26,7 +27,7 @@ class CharacterService {
             return ["status" => 0, "error" => "Invalid character data sent."];
         }
 
-        $accountId = cloneVal($data[0]); // Make sure to decode properly if it's strangely formatted by Sabre
+        $accountId = is_array($data[0]) ? $data[0][0] : (int)$data[0];
         $sessionkeyHash = $data[1]; // Ignored validation for now
         $charName = $data[2];
         $gender = $data[3];
@@ -34,6 +35,13 @@ class CharacterService {
         $hairStyleColor = $data[5];
         $hairNum = $data[6];
         $skinColor = $data[7];
+
+        $user = User::find($accountId);
+        // We can't really validate sessionkey via hash easily here without knowing the algo
+        // but we should at least check if user exists.
+        if (!$user) {
+            return ["status" => 0, "error" => "User not found."];
+        }
 
         if (Character::where('name', $charName)->exists()) {
             return ["status" => 0, "error" => "Character name is already taken!"];
@@ -44,7 +52,7 @@ class CharacterService {
         $face_id  = 'face_01_' . ($gender == 0 ? '0' : '1');
 
         $char = Character::create([
-            'account_id'        => is_array($accountId) ? $accountId[0] : (int) $accountId,
+            'account_id'        => $accountId,
             'name'              => (string) $charName,
             'gender'            => (int) $gender,
             'element'           => (int) $element,
@@ -96,9 +104,107 @@ class CharacterService {
 
     public function getEmblemDailyRewards($char_id, $sessionkey): array
     {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
+        $today = now()->toDateString();
+        
         return [
             "status" => 1,
-            "result" => ["element_learned" => 0],
+            "result" => [
+                "tokens_claimed"  => ($char->ed_tokens_last_claim === $today) ? 1 : 0,
+                "xp_claimed"      => ($char->ed_xp_last_claim === $today) ? 1 : 0,
+                "element_learned" => ($char->ed_skills_last_claim === $today) ? 1 : 0,
+                "double_xp"       => (int)$char->ed_double_xp,
+            ],
+        ];
+    }
+
+    public function claim10Tokens($char_id, $sessionkey): array
+    {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
+        $today = now()->toDateString();
+        if ($char->ed_tokens_last_claim === $today) {
+            return ["status" => 0, "result" => "You have already claimed your daily tokens today."];
+        }
+
+        $user = $char->user;
+        $user->tokens += 10;
+        $user->save();
+
+        $char->ed_tokens_last_claim = $today;
+        $char->save();
+
+        return [
+            "status" => 1,
+            "total"  => 10
+        ];
+    }
+
+    public function claimDoubleXP($char_id, $sessionkey): array
+    {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
+        $today = now()->toDateString();
+        if ($char->ed_xp_last_claim === $today) {
+            return ["status" => 0, "result" => "You have already claimed your daily double XP today."];
+        }
+
+        $char->ed_xp_last_claim = $today;
+        // Reset used double xp pool for the day
+        $char->ed_double_xp = 0;
+        $char->save();
+
+        return ["status" => 1];
+    }
+
+    public function claimAllSkills($char_id, $sessionkey, $element): array
+    {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
+        $today = now()->toDateString();
+        $free_claim_used = ($char->ed_skills_last_claim === $today);
+
+        // Try to consume scroll
+        $has_scroll = $char->removeFromInventory('char_essentials', 'essential_07', 1);
+
+        if (!$has_scroll && $free_claim_used) {
+            return ["status" => 0, "result" => "You need a Secret Scroll of Wisdom or wait until tomorrow."];
+        }
+
+        if (!$has_scroll) {
+            $char->ed_skills_last_claim = $today;
+        }
+
+        $academy = $this->getAcademySkills($char->user->sessionkey, $char->id);
+        $element_names = [1 => 'wind_skills', 2 => 'fire_skills', 3 => 'thunder_skills', 4 => 'water_skills', 5 => 'earth_skills'];
+        $element_key = $element_names[$element] ?? null;
+
+        if (!$element_key || !isset($academy[$element_key])) {
+            return ["status" => 0, "result" => "Invalid element selection."];
+        }
+
+        $skills_to_learn = $academy[$element_key];
+        
+        $owned_skills_str = $char->char_skills;
+        $owned_skills = $owned_skills_str ? explode(',', $owned_skills_str) : [];
+        
+        $owned_skill_ids = array_map(function($s) {
+            return explode(':', $s)[0];
+        }, $owned_skills);
+
+        $new_skills = array_unique(array_merge($owned_skill_ids, $skills_to_learn));
+        
+        $char->char_skills = implode(',', $new_skills);
+        $char->save();
+
+        return [
+            "status" => 1,
+            "skills" => $char->char_skills
         ];
     }
 
@@ -108,11 +214,17 @@ class CharacterService {
      */
     public function unSetPartyControl($char_id, $sessionkey): bool
     {
+        $char = Character::with('user')->find((int)$char_id);
+        if (!$char || $char->user->sessionkey !== $sessionkey) return false;
+
         return true;
     }
 
     public function unRecruitTeammates($char_id, $sessionkey): array
     {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
         return ['status' => 1];
     }
 
@@ -126,7 +238,10 @@ class CharacterService {
      */
     public function setPoints($char_id, $sessionkey, $wind, $fire, $lightning, $water, $earth, $free): array
     {
-        $updated = Character::where('id', (int) $char_id)->update([
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
+        $char->update([
             'atrrib_wind'      => (int) $wind,
             'atrrib_fire'      => (int) $fire,
             'atrrib_lightning' => (int) $lightning,
@@ -135,7 +250,7 @@ class CharacterService {
             'atrrib_free'      => (int) $free,
         ]);
 
-        return ['status' => $updated !== false ? 1 : 0];
+        return ['status' => 1];
     }
 
     /**
@@ -147,13 +262,15 @@ class CharacterService {
      */
     public function deleteCharacter($char_id, $sessionkey, $username, $password, $verification = 0): array
     {
-        $user = \App\Models\User::where('username', $username)->first();
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
 
-        if (!$user || !\Illuminate\Support\Facades\Hash::check($password, $user->password)) {
+        $user = $char->user;
+        if (!\Illuminate\Support\Facades\Hash::check($password, $user->password)) {
             return ['status' => 2]; // wrong password
         }
 
-        \App\Models\Character::where('id', (int) $char_id)
+        Character::where('id', (int) $char_id)
             ->where('account_id', $user->id)
             ->delete();
 
@@ -165,13 +282,12 @@ class CharacterService {
      */
     public function equipSkillSet($char_id, $sessionkey, $skills): array
     {
-        $char = Character::find((int) $char_id);
-        if ($char) {
-            $char->equipped_skills = (string) $skills;
-            $char->save();
-            return ['status' => 1];
-        }
-        return ['status' => 0];
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
+        $char->equipped_skills = (string) $skills;
+        $char->save();
+        return ['status' => 1];
     }
 
     /**
@@ -179,10 +295,8 @@ class CharacterService {
      */
     public function equipSet($char_id, $sessionkey, $weapon, $back_item, $set, $accessory, $hair, $hair_color, $skin_color): array
     {
-        $char = Character::find((int) $char_id);
-        if (!$char) {
-            return ['status' => 0];
-        }
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
 
         $char->equipped_weapon    = (string) $weapon;
         $char->equipped_back_item  = (string) $back_item;
@@ -201,6 +315,9 @@ class CharacterService {
      */
     public function getAcademySkills($sessionkey, $char_id): array
     {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
         return [
             "skills" => [null, [], [], [], [], []],
             "wind_skills" => [
@@ -262,14 +379,46 @@ class CharacterService {
     }
 
     /**
+     * getShopData — returns the items available in the shop.
+     */
+    public function getShopData($char_id, $sessionkey, $gender): array
+    {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
+        $gender_suffix = ((int)$gender == 0) ? '0' : '1';
+
+        $all_sets = ['set_01_0', 'set_01_1', 'set_02_0', 'set_02_1', 'set_03_0', 'set_03_1'];
+        $all_hairs = ['hair_01_0', 'hair_01_1', 'hair_02_0', 'hair_02_1', 'hair_03_0', 'hair_03_1'];
+
+        $setArray = array_values(array_filter($all_sets, function($item) use ($gender_suffix) {
+            return str_ends_with($item, '_' . $gender_suffix);
+        }));
+
+        $hairArray = array_values(array_filter($all_hairs, function($item) use ($gender_suffix) {
+            return str_ends_with($item, '_' . $gender_suffix);
+        }));
+
+        return [
+            'status' => 1,
+            'weaponArray' => ['wpn_01', 'wpn_02', 'wpn_03', 'wpn_04', 'wpn_05'],
+            'backArray' => ['back_01', 'back_02', 'back_03'],
+            'accArray' => ['accessory_01', 'accessory_02', 'accessory_03'],
+            'setArray' => $setArray,
+            'hairArray' => $hairArray,
+            'itemsArray' => [],
+            'essentialsArray' => [],
+            'materialsArray' => [],
+        ];
+    }
+
+    /**
      * buySkill — buys a skill from the Academy.
      */
     public function buySkill($sessionkey, $char_id, $skill_id): array
     {
-        $char = Character::find((int) $char_id);
-        if (!$char) {
-            return ['status' => 0, 'error' => 'Character not found'];
-        }
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
 
         $user = $char->user;
 
@@ -310,6 +459,9 @@ class CharacterService {
      */
     public function getSkillData($char_id, $sessionkey): array
     {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
         return [
             'status' => 1,
             'all_wind_skills'    => [
@@ -481,10 +633,8 @@ class CharacterService {
 
     public function getItemFavoriteData($char_id, $sessionkey): array
     {
-        $char = Character::find((int) $char_id);
-        if (!$char) {
-            return [];
-        }
+        $char = $this->validateSession($char_id, $sessionkey, []);
+        if (!($char instanceof Character)) return $char;
 
         $favorites = $char->char_favorites ? explode(',', $char->char_favorites) : [];
         return $favorites;
@@ -492,10 +642,8 @@ class CharacterService {
 
     public function toogleItemFavorite($char_id, $sessionkey, $item_id): array
     {
-        $char = Character::find((int) $char_id);
-        if (!$char) {
-            return [];
-        }
+        $char = $this->validateSession($char_id, $sessionkey, []);
+        if (!($char instanceof Character)) return $char;
 
         $favorites = $char->char_favorites ? explode(',', $char->char_favorites) : [];
         

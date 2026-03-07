@@ -4,6 +4,8 @@ namespace App\Services;
 
 class SenjutsuService
 {
+    use \App\Traits\SessionValidator;
+
     /**
      * getSenjutsuSkills
      * Client reads:
@@ -14,12 +16,15 @@ class SenjutsuService
      */
     public function getSenjutsuSkills($char_id, $sessionkey, $full = false): array
     {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof \App\Models\Character)) return $char;
+
         return [
             'status'                    => 1,
             'error'                     => 0,
             'data'                      => [],
-            'ss_points'                 => 0,
-            'character_senjutsu_skills' => '',
+            'ss_points'                 => $char->ss_points ?? 0,
+            'character_senjutsu_skills' => $char->char_senjutsu_skills ?? '',
         ];
     }
 
@@ -28,12 +33,74 @@ class SenjutsuService
      */
     public function discoverSenjutsu($char_id, $sessionkey, $type): array
     {
-        return ['status' => 2, 'result' => 'Senjutsu discovery is not yet available.'];
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof \App\Models\Character)) return $char;
+
+        if ($char->gold < 2000000) {
+            return ['status' => 2, 'result' => 'Not enough Gold to discover Senjutsu.'];
+        }
+
+        $skill_a = ($type === 'toad') ? 'skill_3000' : 'skill_3100';
+        $skill_b = ($type === 'toad') ? 'skill_3001' : 'skill_3101';
+
+        $skills = $char->getInventoryArray('char_senjutsu_skills');
+        if (isset($skills[$skill_a]) || isset($skills[$skill_b])) {
+            return ['status' => 2, 'result' => 'Already discovered.'];
+        }
+
+        $char->gold -= 2000000;
+        
+        $skills[$skill_a] = 1;
+        $skills[$skill_b] = 0; // The client expects at least level 0 to show the tree
+        
+        $char->setInventoryArray('char_senjutsu_skills', $skills);
+        $char->save();
+
+        return [
+            'status' => 1,
+            'golds'  => $char->gold,
+            'tokens' => $char->user->tokens ?? 0,
+        ];
     }
 
     public function upgradeSkill($char_id, $sessionkey, $skill_id): array
     {
-        return ['status' => 2, 'result' => 'Senjutsu upgrades are not yet available.'];
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof \App\Models\Character)) return $char;
+
+        $skills = $char->getInventoryArray('char_senjutsu_skills');
+        $current_level = $skills[$skill_id] ?? 0;
+        $next_level = $current_level + 1;
+
+        if ($next_level > 10) {
+            return ['status' => 2, 'result' => 'Skill is already at max level.'];
+        }
+
+        $ss_costs = [
+            1 => 5,
+            2 => 10,
+            3 => 25,
+            4 => 50,
+            5 => 100,
+            6 => 200,
+            7 => 300,
+            8 => 450,
+            9 => 600,
+            10 => 800
+        ];
+
+        $cost = $ss_costs[$next_level];
+
+        if ($char->ss_points < $cost) {
+            return ['status' => 2, 'result' => "Not enough SS points."];
+        }
+
+        $char->ss_points -= $cost;
+        $skills[$skill_id] = $next_level;
+        $char->setInventoryArray('char_senjutsu_skills', $skills);
+        $char->save();
+
+        return ['status' => 1];
     }
 
     public function reset($char_id, $sessionkey): array

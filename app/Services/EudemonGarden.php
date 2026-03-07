@@ -6,6 +6,8 @@ use App\Models\Character;
 
 class EudemonGarden
 {
+    use \App\Traits\LevelManager;
+
     /**
      * getData — returns boss attempts.
      * Arguments: [sessionkey, char_id]
@@ -52,22 +54,16 @@ class EudemonGarden
         $xp_gain   = (500 * (int) $boss_num) + 1200;
         $gold_gain = (200 * (int) $boss_num) + 600;
 
-        $new_xp   = (int) $char->xp + $xp_gain;
-        $level_up = false;
-        $new_level = (int) $char->level;
+        $awards = $this->awardXp($char, $xp_gain);
+        $new_xp = $awards['xp'];
+        $new_level = $awards['level'];
+        $level_up = $awards['level_up'];
+        $actual_xp_gain = $awards['xp_gain'];
 
-        $xp_needed = $new_level * 1000;
-        if ($new_xp >= $xp_needed && $new_level < 80) {
-            $new_xp -= $xp_needed;
-            $new_level++;
-            $level_up = true;
-        }
-
-        $char->update([
-            'xp'    => (string)$new_xp,
-            'level' => (string)$new_level,
-            'gold'  => (string)((int) $char->gold + $gold_gain),
-        ]);
+        $char->xp = $new_xp;
+        $char->level = $new_level;
+        $char->gold = (int) $char->gold + $gold_gain;
+        $char->save();
 
         return [
             'status'   => 1,
@@ -75,7 +71,7 @@ class EudemonGarden
             'xp'       => $new_xp,
             'level_up' => $level_up,
             'result'   => [
-                (string) $xp_gain,
+                (string) $actual_xp_gain,
                 (string) $gold_gain,
                 [], // Items array
                 $level_up,

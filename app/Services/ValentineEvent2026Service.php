@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Log;
 
 class ValentineEvent2026Service
 {
+    use \App\Traits\SessionValidator;
+    use \App\Traits\LevelManager;
     /**
      * executeService — Generic wrapper for ValentineEvent2026 calls.
      */
@@ -126,8 +128,8 @@ class ValentineEvent2026Service
                 'pack_0' => $event->pack_0,
                 'pack_1' => $event->pack_1,
                 'pack_2' => $event->pack_2,
-                'skills' => ['skill_1447', 'skill_1448', 'skill_1449'],
-                'prices' => [2999, 4999, 7999]
+                'skills' => ['skill_1443', 'skill_1444', 'skill_1445'],
+                'prices' => [8000, 8000, 8000]
             ],
 
             'tasksData' => $event->tasks_status,
@@ -206,7 +208,22 @@ class ValentineEvent2026Service
             $event->save();
         }
 
-        return $this->getData($char_id);
+        $char = Character::find((int)$char_id);
+        
+        $xp_gain = 0; // Events currently don't award XP on endBattle, change here if needed.
+        $awards = $this->awardXp($char, $xp_gain);
+        
+        $char->xp = $awards['xp'];
+        $char->level = $awards['level'];
+        $char->save();
+
+        return [
+            'status' => 1,
+            'xp' => $awards['xp'],
+            'level' => $awards['level'],
+            'level_up' => $awards['level_up'],
+            'result' => ['' . $xp_gain, '0', []]
+        ];
     }
 
 
@@ -225,13 +242,63 @@ class ValentineEvent2026Service
         $event->battle_claims = $claims;
         $event->save();
 
-        // Grant reward
-        $rewards = $this->getBattleProgressRewards()[(int)$boss_idx][(int)$reward_idx] ?? null;
-        if ($rewards) {
-             // grant logic...
+        $char = Character::find((int)$char_id);
+        $rewards = $this->getBattleProgressRewards()[(int)$boss_idx];
+        $reward = $rewards[(int)$reward_idx] ?? null;
+
+        if ($reward) {
+            $this->awardItem($char, $reward);
         }
 
-        return $this->getData($char_id);
+        $data = $this->getData($char_id);
+        if ($reward) {
+            $data['extra_data'] = ['rewards' => [$reward]];
+        }
+        return $data;
+    }
+
+    private function awardItem(Character $char, string $item): void
+    {
+        if (str_starts_with($item, 'essential_')) {
+            $p = explode('_', $item);
+            if (count($p) == 3) {
+                $char->addToInventory('char_essentials', "essential_{$p[1]}", (int)$p[2]);
+            } else {
+                $char->addToInventory('char_essentials', $item, 1);
+            }
+        } elseif (str_starts_with($item, 'material_')) {
+            $p = explode('_', $item);
+            if (count($p) == 3) {
+                $char->addToInventory('char_materials', "material_{$p[1]}", (int)$p[2]);
+            } else {
+                $char->addToInventory('char_materials', $item, 1);
+            }
+        } elseif (str_starts_with($item, 'skill_')) {
+            $char->addToInventory('char_skills', $item);
+        } elseif (str_starts_with($item, 'wpn_')) {
+            $char->addToInventory('char_weapons', $item);
+        } elseif (str_starts_with($item, 'hair_')) {
+            $char->addToInventory('char_hairs', $item);
+        } elseif (str_starts_with($item, 'set_')) {
+            $char->addToInventory('char_sets', $item);
+        } elseif (str_starts_with($item, 'back_')) {
+            $char->addToInventory('char_back_items', $item);
+        } elseif (str_starts_with($item, 'accessory_')) {
+            $char->addToInventory('char_accessories', $item);
+        } elseif (str_starts_with($item, 'gold_')) {
+            $p = explode('_', $item);
+            $amount = (int)end($p);
+            $char->gold += $amount;
+        } elseif (str_starts_with($item, 'tokens_')) {
+            $p = explode('_', $item);
+            $amount = (int)end($p);
+            $user = $char->user;
+            if ($user) {
+                $user->tokens += $amount;
+                $user->save();
+            }
+        }
+        $char->save();
     }
 
     private function claimGachaProgress($char_id, $reward_idx): array
@@ -318,7 +385,7 @@ class ValentineEvent2026Service
         $event->save();
 
         // Specific skill grants
-        $skills_map = ['skill_1447', 'skill_1448', 'skill_1449'];
+        $skills_map = ['skill_1443', 'skill_1444', 'skill_1445'];
         $skill = $skills_map[(int)$buy_id] ?? null;
         if ($skill) {
             $char->addToInventory('char_skills', $skill);
@@ -328,7 +395,7 @@ class ValentineEvent2026Service
         $data = $this->getData($char_id);
         $data['extra_data'] = [
             'message' => 'Skills updated!',
-            'reduce_tokens' => 0, // We already reduced them in the user model
+            'reduce_tokens' => $price, // We already reduced them in the user model
             'reward' => $skill ? [$skill] : [],
             'remove_skill' => '',
             'data_skill' => 'false'
