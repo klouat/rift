@@ -43,6 +43,3 @@ This is the backend service for Rift, a ninja-themed RPG game. It is built using
 - `app/Http/Controllers/`: AMF gateway implementation.
 - `database/migrations/`: Database schema definitions.
 
-## License
-
-Private / Confidential.
