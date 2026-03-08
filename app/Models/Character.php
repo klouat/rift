@@ -103,10 +103,19 @@ class Character extends Model
 
         $parts = [];
         foreach ($items as $item) {
+            $ident = $item->$id_col;
+
+            // Dynamically apply gender suffix
+            if ($id_col === 'item_id' && (str_starts_with($ident, 'hair_') || str_starts_with($ident, 'set_'))) {
+                if (preg_match('/_[01]$/', $ident)) {
+                    $ident = substr($ident, 0, -1) . $this->gender;
+                }
+            }
+
             if ($item->quantity > 1 || in_array($column, $always_qty_columns)) {
-                $parts[] = "{$item->$id_col}:{$item->quantity}";
+                $parts[] = "{$ident}:{$item->quantity}";
             } else {
-                $parts[] = $item->$id_col;
+                $parts[] = $ident;
             }
         }
         return implode(',', $parts);
@@ -181,7 +190,13 @@ class Character extends Model
         $id_col = in_array($column, ['char_skills', 'char_talent_skills', 'char_senjutsu_skills']) ? 'skill_id' : 'item_id';
 
         foreach ($items as $item) {
-            $res[$item->$id_col] = $item->quantity;
+            $ident = $item->$id_col;
+            if ($id_col === 'item_id' && (str_starts_with($ident, 'hair_') || str_starts_with($ident, 'set_'))) {
+                if (preg_match('/_[01]$/', $ident)) {
+                    $ident = substr($ident, 0, -1) . $this->gender;
+                }
+            }
+            $res[$ident] = $item->quantity;
         }
         return $res;
     }
@@ -208,7 +223,19 @@ class Character extends Model
     public function removeFromInventory(string $column, string $id, int $qty = 1): bool
     {
         $id_col = in_array($column, ['char_skills', 'char_talent_skills', 'char_senjutsu_skills']) ? 'skill_id' : 'item_id';
-        $item = $this->getRelationForColumn($column)->where($id_col, $id)->first();
+        
+        $query = $this->getRelationForColumn($column);
+        if ($id_col === 'item_id' && (str_starts_with($id, 'hair_') || str_starts_with($id, 'set_')) && preg_match('/_[01]$/', $id)) {
+            $baseId = substr($id, 0, -1);
+            $query->where(function($q) use ($id_col, $baseId) {
+                $q->where($id_col, $baseId . '0')->orWhere($id_col, $baseId . '1');
+            });
+        } else {
+            $query->where($id_col, $id);
+        }
+        
+        $item = $query->first();
+
         if (!$item || $item->quantity < $qty) {
             return false;
         }
@@ -221,10 +248,41 @@ class Character extends Model
         }
         return true;
     }
+
     public function hasInInventory(string $column, string $id, int $qty = 1): bool
     {
         $id_col = in_array($column, ['char_skills', 'char_talent_skills', 'char_senjutsu_skills']) ? 'skill_id' : 'item_id';
-        $item = $this->getRelationForColumn($column)->where($id_col, $id)->first();
+        
+        $query = $this->getRelationForColumn($column);
+        if ($id_col === 'item_id' && (str_starts_with($id, 'hair_') || str_starts_with($id, 'set_')) && preg_match('/_[01]$/', $id)) {
+            $baseId = substr($id, 0, -1);
+            $query->where(function($q) use ($id_col, $baseId) {
+                $q->where($id_col, $baseId . '0')->orWhere($id_col, $baseId . '1');
+            });
+        } else {
+            $query->where($id_col, $id);
+        }
+        
+        $item = $query->first();
+
         return $item && $item->quantity >= $qty;
+    }
+
+    public function setEquippedClothingAttribute($value)
+    {
+        if ($value && preg_match('/_[01]$/', $value)) {
+            $this->attributes['equipped_clothing'] = substr($value, 0, -1) . ($this->gender ?? 0);
+        } else {
+            $this->attributes['equipped_clothing'] = $value;
+        }
+    }
+
+    public function setEquippedHairstyleAttribute($value)
+    {
+        if ($value && preg_match('/_[01]$/', $value)) {
+            $this->attributes['equipped_hairstyle'] = substr($value, 0, -1) . ($this->gender ?? 0);
+        } else {
+            $this->attributes['equipped_hairstyle'] = $value;
+        }
     }
 }

@@ -115,6 +115,36 @@ class SenjutsuService
 
     public function useSenjutsuPointPill($char_id, $sessionkey, $item_id, $qty): array
     {
-        return ['status' => 2, 'result' => 'Not available.'];
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof \App\Models\Character)) return $char;
+
+        $qty = (int)$qty;
+        if (!$char->hasInInventory('char_essentials', $item_id, $qty)) {
+            return ['status' => 0, 'result' => 'You do not have enough items!'];
+        }
+
+        $ss_values = [
+            'essential_122' => 10,
+            'essential_123' => 50,
+            'essential_124' => 100,
+            'essential_201' => 10,
+            'essential_202' => 50,
+            'essential_203' => 100,
+        ];
+
+        $ss_per_pill = $ss_values[$item_id] ?? 10;
+        $total_ss = $ss_per_pill * $qty;
+
+        $char->ss_points = ($char->ss_points ?? 0) + $total_ss;
+        $char->removeFromInventory('char_essentials', $item_id, $qty);
+        $char->save();
+
+        return [
+            'status'         => 1,
+            'essential_used' => $item_id,
+            'total'          => $qty,
+            'ss_got'         => $total_ss,
+            'result'         => "Successfully used {$qty} pills and got {$total_ss} SS points!"
+        ];
     }
 }

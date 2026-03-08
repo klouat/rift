@@ -278,6 +278,52 @@ class CharacterService {
     }
 
     /**
+     * Handles changing character gender.
+     */
+    public function changeGender($char_id, $sessionkey, $password): array
+    {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
+        $user = $char->user;
+
+        if (!\Illuminate\Support\Facades\Hash::check($password, $user->password)) {
+            return ['status' => 2, 'result' => 'Wrong password!'];
+        }
+
+        if ($user->tokens < 10000) {
+            return ['status' => 2, 'result' => 'Not enough Tokens!'];
+        }
+
+        $user->tokens -= 10000;
+        $user->save();
+
+        $new_gender = $char->gender == 0 ? 1 : 0;
+        $char->gender = $new_gender;
+
+        // Switch equipped sets and hairs in DB
+        if ($char->equipped_clothing && preg_match('/_[01]$/', $char->equipped_clothing)) {
+            $char->equipped_clothing = substr($char->equipped_clothing, 0, -1) . $new_gender;
+        }
+        if ($char->equipped_hairstyle && preg_match('/_[01]$/', $char->equipped_hairstyle)) {
+            $char->equipped_hairstyle = substr($char->equipped_hairstyle, 0, -1) . $new_gender;
+        }
+
+        $char->save();
+
+        // Update all inventory items physically in the Database
+        \Illuminate\Support\Facades\DB::update("
+            UPDATE character_items
+            SET item_id = CONCAT(SUBSTRING(item_id, 1, LENGTH(item_id) - 1), ?)
+            WHERE character_id = ? 
+              AND (item_type = 'char_sets' OR item_type = 'char_hairs')
+              AND item_id REGEXP '_[01]$'
+        ", [$new_gender, $char->id]);
+
+        return ['status' => 1, 'result' => 'Gender changed successfully!'];
+    }
+
+    /**
      * Persists the equipped skills (comma-separated string).
      */
     public function equipSkillSet($char_id, $sessionkey, $skills): array
@@ -582,22 +628,8 @@ class CharacterService {
     
     private function getLibraryItem(string $item_id)
     {
-        $library = cache()->remember('game_library_json', 3600, function () {
-            $path = base_path('library.json');
-            if (file_exists($path)) {
-                $content = json_decode(file_get_contents($path), true);
-                if (isset($content['savedLibrary'])) {
-                    $lookup = [];
-                    foreach ($content['savedLibrary'] as $i) {
-                        $lookup[$i['item_id']] = $i['effects'] ?? [];
-                    }
-                    return $lookup;
-                }
-            }
-            return [];
-        });
-
-        return $library[$item_id] ?? null;
+        $libItem = \App\Models\GameLibrary::where('item_id', $item_id)->first();
+        return $libItem ? $libItem->data : null;
     }
 
     /**
@@ -845,6 +877,218 @@ class CharacterService {
         $char->save();
 
         return $favorites;
+    }
+
+    public function renameCharacter($char_id, $sessionkey, $new_name): array
+    {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
+        if (empty($new_name)) {
+            return ['status' => 0, 'result' => 'New name cannot be empty!'];
+        }
+
+        // Check if name is taken
+        if (Character::where('name', $new_name)->where('id', '!=', $char->id)->exists()) {
+            return ['status' => 0, 'result' => 'This name is already taken!'];
+        }
+
+        // Cost calculation (account_type 0 = 3 badges, others = 1 badge)
+        $user = $char->user;
+        $cost = ($user->account_type == 0) ? 3 : 1;
+
+        if (!$char->hasInInventory('char_essentials', 'essential_01', $cost)) {
+            return ['status' => 0, 'result' => 'You do not have enough Rename Badges!'];
+        }
+
+        // Apply changes
+        $char->removeFromInventory('char_essentials', 'essential_01', $cost);
+        $char->name = $new_name;
+        $char->save();
+
+        return [
+            'status' => 1,
+            'result' => 'Character renamed successfully!'
+        ];
+    }
+
+    public function openFuku($char_id, $sessionkey, $item_id, $quantity): array
+    {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
+        $quantity = (int)$quantity;
+        if (!$char->hasInInventory('char_essentials', $item_id, $quantity)) {
+            return ['status' => 0, 'result' => 'You do not have enough items!'];
+        }
+
+        // Map of item_id to pool of reward strings.
+        // Format: 'type_id_quantity' or 'type_id_qty,type_id_qty' for multiple items in one roll.
+        $possible_rewards = [
+            'essential_55' => [
+                'essential_71_1', // Big Arena Energy Capsule
+                'essential_72_1', // Big PVP Energy Capsule
+                'essential_73_1', // Big Pet Arena Energy Capsule
+                'essential_74_1', // Big Event Energy Capsule
+                'essential_75_1', // Big PVE Energy Capsule
+                'material_66_2',  // Twin Stamina Rolls (2x)
+                'material_65_2',  // Twin Golden Stamina Rolls (2x)
+                'material_67_2',  // 2x Vitality Gourd
+                // Multiple items in one pull
+                'essential_71_1,essential_72_1,essential_73_1', // All capsules pack
+                'material_66_5', // 5x Stamina Rolls
+                'essential_71_10', // 10x Arena Energy
+            ],
+        ];
+
+        $rewards_pool = $possible_rewards[$item_id] ?? ['gold_10000'];
+        $final_rewards = [];
+
+        // Determine how many rolls per bag (usually 1)
+        $rolls_per_item = 1;
+
+        for ($i = 0; $i < $quantity; $i++) {
+            for ($r = 0; $r < $rolls_per_item; $r++) {
+                $reward_str = $rewards_pool[array_rand($rewards_pool)];
+                
+                // Support multiple rewards in a single string like "item_1,item_2"
+                $reward_items = explode(',', $reward_str);
+                foreach ($reward_items as $single_reward) {
+                    $final_rewards[] = $single_reward;
+                    $this->applyRewardString($char, $single_reward);
+                }
+            }
+        }
+
+        $char->removeFromInventory('char_essentials', $item_id, $quantity);
+        $char->save();
+
+        return [
+            'status' => 1,
+            'essential_used' => $item_id,
+            'total'          => $quantity,
+            'reward'         => $final_rewards,
+        ];
+    }
+
+    public function getRandomFruit($char_id, $sessionkey, $item_id, $quantity): array
+    {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
+        $quantity = (int)$quantity;
+        if (!$char->hasInInventory('char_essentials', $item_id, $quantity)) {
+            return ['status' => 0, 'result' => 'You do not have enough items!'];
+        }
+
+        $fruits = ['essential_42_1', 'essential_43_1', 'essential_44_1', 'essential_45_1', 'essential_46_1'];
+        $final_rewards = [];
+
+        for ($i = 0; $i < $quantity; $i++) {
+            $reward_str = $fruits[array_rand($fruits)];
+            $final_rewards[] = $reward_str;
+            $this->applyRewardString($char, $reward_str);
+        }
+
+        $char->removeFromInventory('char_essentials', $item_id, $quantity);
+        $char->save();
+
+        return [
+            'status' => 1,
+            'essential_used' => $item_id,
+            'total'          => $quantity,
+            'reward'         => $final_rewards,
+        ];
+    }
+
+    public function getRandomDragonBall($char_id, $sessionkey, $item_id, $quantity): array
+    {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
+        $quantity = (int)$quantity;
+        if (!$char->hasInInventory('char_materials', $item_id, $quantity)) {
+            return ['status' => 0, 'result' => 'You do not have enough materials!'];
+        }
+
+        $balls = ['material_191_1', 'material_192_1', 'material_193_1', 'material_194_1', 'material_195_1', 'material_196_1', 'material_197_1'];
+        $final_rewards = [];
+
+        for ($i = 0; $i < $quantity; $i++) {
+            $reward_str = $balls[array_rand($balls)];
+            $final_rewards[] = $reward_str;
+            $this->applyRewardString($char, $reward_str);
+        }
+
+        $char->removeFromInventory('char_materials', $item_id, $quantity);
+        $char->save();
+
+        return [
+            'status' => 1,
+            'material_used' => $item_id,
+            'total'          => $quantity,
+            'reward'         => $final_rewards,
+        ];
+    }
+
+    private function applyRewardString(Character $char, string $reward)
+    {
+        $parts = explode('_', $reward);
+        $type = $parts[0];
+        $id_or_val = $parts[1];
+        $qty = (isset($parts[2]) && is_numeric($parts[2])) ? (int)$parts[2] : 1;
+
+        switch ($type) {
+            case 'gold':
+            case 'golds':
+                $char->gold += (int)$id_or_val;
+                break;
+            case 'token':
+            case 'tokens':
+                $user = $char->user;
+                $user->tokens += (int)$id_or_val;
+                $user->save();
+                break;
+            case 'tp':
+            case 'tps':
+                $char->tp += (int)$id_or_val;
+                break;
+            case 'xp':
+            case 'xps':
+                $char->xp += (int)$id_or_val;
+                break;
+            case 'wpn':
+                $char->addToInventory('char_weapons', $reward);
+                break;
+            case 'back':
+                $char->addToInventory('char_back_items', $reward);
+                break;
+            case 'accessory':
+                $char->addToInventory('char_accessories', $reward);
+                break;
+            case 'set':
+                $char->addToInventory('char_sets', $reward);
+                break;
+            case 'hair':
+                $char->addToInventory('char_hairs', $reward);
+                break;
+            case 'item':
+            case 'material':
+                $id = $parts[0] . '_' . $parts[1];
+                $char->addToInventory('char_materials', $id, $qty);
+                break;
+            case 'essential':
+                $id = $parts[0] . '_' . $parts[1];
+                $char->addToInventory('char_essentials', $id, $qty);
+                break;
+            case 'skill':
+                $skills = $char->char_skills ? explode(',', $char->char_skills) : [];
+                if (!in_array($reward, $skills)) {
+                    $skills[] = $reward;
+                    $char->char_skills = implode(',', $skills);
+                }
+                break;
+        }
     }
 }
 

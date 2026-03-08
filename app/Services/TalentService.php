@@ -310,8 +310,40 @@ class TalentService
         ];
     }
 
+    use \App\Traits\SessionValidator;
+
     public function useTalentPointPill($char_id, $sessionkey, $item_id, $qty): array
     {
-        return ['status' => 2, 'result' => 'Not available.'];
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof \App\Models\Character)) return $char;
+
+        $qty = (int)$qty;
+        if (!$char->hasInInventory('char_essentials', $item_id, $qty)) {
+            return ['status' => 0, 'result' => 'You do not have enough items!'];
+        }
+
+        $tp_values = [
+            'essential_21' => 10,
+            'essential_22' => 50,
+            'essential_23' => 100,
+            'essential_168' => 10,
+            'essential_169' => 50,
+            'essential_170' => 100,
+        ];
+
+        $tp_per_pill = $tp_values[$item_id] ?? 10;
+        $total_tp = $tp_per_pill * $qty;
+
+        $char->tp += $total_tp;
+        $char->removeFromInventory('char_essentials', $item_id, $qty);
+        $char->save();
+
+        return [
+            'status'         => 1,
+            'essential_used' => $item_id,
+            'total'          => $qty,
+            'tp_got'         => $total_tp,
+            'result'         => "Successfully used {$qty} pills and got {$total_tp} TP!"
+        ];
     }
 }
