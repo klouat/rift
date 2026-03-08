@@ -22,6 +22,14 @@ foreach ($libraries as $lib) {
         Route::get('/skillLibrary', [\App\Http\Controllers\SkillLibraryController::class, 'index']);
         continue;
     }
+    if ($lib === 'petInfo') {
+        Route::get('/petInfo', [\App\Http\Controllers\PetInfoController::class, 'getPetInfo']);
+        continue;
+    }
+    if ($lib === 'petSkillInfo') {
+        Route::get('/petSkillInfo', [\App\Http\Controllers\PetInfoController::class, 'getPetSkillInfo']);
+        continue;
+    }
     Route::get('/' . $lib, function () {
         return response()->json([]);
     });

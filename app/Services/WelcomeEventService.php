@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 class WelcomeEventService
 {
     use \App\Traits\SessionValidator;
+    use \App\Traits\RewardHandler;
 
     /**
      * claimFreePackage - Claims the welcome package rewards.
@@ -32,16 +33,11 @@ class WelcomeEventService
 
         try {
             // Rewards from Package_Welcome.as:38-42
-            // wpn_303, back_43, set_103_GENDER, hair_33_GENDER, 100 tokens
+            // wpn_303, back_43, set_103, hair_33, 100 tokens
             
-            $char->addToInventory('char_weapons', 'wpn_303', 1);
-            $char->addToInventory('char_back_items', 'back_43', 1);
-            $char->addToInventory('char_sets', 'set_103', 1);
-            $char->addToInventory('char_hairs', 'hair_33', 1);
-
-            $user = $char->user;
-            $user->tokens += 100;
-            $user->save();
+            $response = $this->awardReward($char, [
+                'items' => ['wpn_303', 'back_43', 'set_103', 'hair_33', 'tokens_100']
+            ]);
 
             $char->welcome_claimed = true;
             $char->save();

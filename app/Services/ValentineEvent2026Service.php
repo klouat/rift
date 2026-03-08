@@ -10,6 +10,7 @@ class ValentineEvent2026Service
 {
     use \App\Traits\SessionValidator;
     use \App\Traits\LevelManager;
+    use \App\Traits\RewardHandler;
     /**
      * executeService — Generic wrapper for ValentineEvent2026 calls.
      */
@@ -67,19 +68,23 @@ class ValentineEvent2026Service
             }
         }
 
-        $rewards = [];
+        $reward_list = [];
         $pool = $this->getGachaPool();
+        $granted_items = [];
         for ($i = 0; $i < (int)$amount; $i++) {
-            $reward_id = array_rand($pool);
-            $rewards[] = [$pool[$reward_id]];
+            $reward_id = $pool[array_rand($pool)];
+            $this->processSingleReward($char, $reward_id, $granted_items);
+            $reward_list[] = [$reward_id];
         }
+
+        $char->save();
 
         $event->total_draws += (int)$amount;
         $event->save();
 
         return [
             'status' => 1,
-            'rewards' => $rewards
+            'rewards' => $reward_list
         ];
     }
 
@@ -157,7 +162,8 @@ class ValentineEvent2026Service
 
         $char = Character::find((int)$char_id);
         $rewards = ['essential_141', 'essential_142', 'essential_143', 'essential_144'];
-        foreach ($rewards as $r) $char->addToInventory('char_essentials', $r);
+        $granted = [];
+        foreach ($rewards as $r) $this->processSingleReward($char, $r, $granted);
         $char->save();
 
         $data = $this->getData($char_id);
@@ -247,7 +253,9 @@ class ValentineEvent2026Service
         $reward = $rewards[(int)$reward_idx] ?? null;
 
         if ($reward) {
-            $this->awardItem($char, $reward);
+            $granted = [];
+            $this->processSingleReward($char, $reward, $granted);
+            $char->save();
         }
 
         $data = $this->getData($char_id);
@@ -255,50 +263,6 @@ class ValentineEvent2026Service
             $data['extra_data'] = ['rewards' => [$reward]];
         }
         return $data;
-    }
-
-    private function awardItem(Character $char, string $item): void
-    {
-        if (str_starts_with($item, 'essential_')) {
-            $p = explode('_', $item);
-            if (count($p) == 3) {
-                $char->addToInventory('char_essentials', "essential_{$p[1]}", (int)$p[2]);
-            } else {
-                $char->addToInventory('char_essentials', $item, 1);
-            }
-        } elseif (str_starts_with($item, 'material_')) {
-            $p = explode('_', $item);
-            if (count($p) == 3) {
-                $char->addToInventory('char_materials', "material_{$p[1]}", (int)$p[2]);
-            } else {
-                $char->addToInventory('char_materials', $item, 1);
-            }
-        } elseif (str_starts_with($item, 'skill_')) {
-            $char->addToInventory('char_skills', $item);
-        } elseif (str_starts_with($item, 'wpn_')) {
-            $char->addToInventory('char_weapons', $item);
-        } elseif (str_starts_with($item, 'hair_')) {
-            $char->addToInventory('char_hairs', $item);
-        } elseif (str_starts_with($item, 'set_')) {
-            $char->addToInventory('char_sets', $item);
-        } elseif (str_starts_with($item, 'back_')) {
-            $char->addToInventory('char_back_items', $item);
-        } elseif (str_starts_with($item, 'accessory_')) {
-            $char->addToInventory('char_accessories', $item);
-        } elseif (str_starts_with($item, 'gold_')) {
-            $p = explode('_', $item);
-            $amount = (int)end($p);
-            $char->gold += $amount;
-        } elseif (str_starts_with($item, 'tokens_')) {
-            $p = explode('_', $item);
-            $amount = (int)end($p);
-            $user = $char->user;
-            if ($user) {
-                $user->tokens += $amount;
-                $user->save();
-            }
-        }
-        $char->save();
     }
 
     private function claimGachaProgress($char_id, $reward_idx): array
@@ -315,6 +279,16 @@ class ValentineEvent2026Service
         $event->gacha_claims = $claims;
         $event->save();
 
+        // Specific gacha progress rewards
+        $progress_rewards = ['essential_141', 'essential_142', 'essential_143', 'essential_144', 'essential_98_1', 'essential_99_1', 'set_1283_0', 'wpn_1469', 'skill_1447'];
+        $reward = $progress_rewards[(int)$reward_idx] ?? null;
+        if ($reward) {
+            $char = Character::find((int)$char_id);
+            $granted = [];
+            $this->processSingleReward($char, $reward, $granted);
+            $char->save();
+        }
+
         return $this->getData($char_id);
     }
 
@@ -325,12 +299,13 @@ class ValentineEvent2026Service
         $found = false;
         foreach ($tasks as &$t) {
             if ($t['task_id'] == $task_id && $t['claimed'] == 0) {
-                // Check if total requirement met. 
-                // In a real system we'd check against actual task progress.
                 if ($t['total'] >= 1) { 
                     $t['claimed'] = 1;
                     $found = true;
-                    // grant $t['task_reward']
+                    $char = Character::find((int)$char_id);
+                    $granted = [];
+                    $this->processSingleReward($char, $t['task_reward'], $granted);
+                    $char->save();
                 }
             }
         }

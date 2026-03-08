@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\Log;
 
 class LevelUpPackagesService
 {
+    use \App\Traits\LevelManager;
+    use \App\Traits\RewardHandler;
     /**
      * executeService — Generic wrapper for LevelUpPackages calls.
      */
@@ -116,34 +118,9 @@ class LevelUpPackagesService
         $all_rewards = $this->getRewards();
         $rewards = $all_rewards[$pack_idx] ?? [];
 
+        $granted = [];
         foreach ($rewards as $item) {
-            if (str_starts_with($item, 'skill_')) {
-                $char->addToInventory('char_skills', $item);
-            } elseif (str_starts_with($item, 'wpn_')) {
-                $char->addToInventory('char_weapons', $item);
-            } elseif (str_starts_with($item, 'back_')) {
-                $char->addToInventory('char_back_items', $item);
-            } elseif (str_starts_with($item, 'accessory_')) {
-                $char->addToInventory('char_accessories', $item);
-            } elseif (str_starts_with($item, 'set_')) {
-                $char->addToInventory('char_sets', $item);
-            } elseif (str_starts_with($item, 'hair_')) {
-                $char->addToInventory('char_hairs', $item);
-            } elseif (str_starts_with($item, 'tokens_')) {
-                $amt = (int)str_replace('tokens_', '', $item);
-                $user = $char->user;
-                if ($user) {
-                    $user->tokens += $amt;
-                    $user->save();
-                }
-            } elseif (str_starts_with($item, 'essential_')) {
-                $p = explode('_', $item);
-                if (count($p) == 3) {
-                    $char->addToInventory('char_essentials', "essential_{$p[1]}", (int)$p[2]);
-                } else {
-                    $char->addToInventory('char_essentials', $item, 1);
-                }
-            }
+            $this->processSingleReward($char, $item, $granted);
         }
 
         $char->save();

@@ -8,7 +8,8 @@ use App\Traits\LevelManager;
 
 class HuntingHouse
 {
-    use LevelManager;
+    use \App\Traits\LevelManager;
+    use \App\Traits\RewardHandler;
     /**
      * getData — returns boss attempts and essential amount.
      * Arguments: [sessionkey, char_id]
@@ -143,37 +144,13 @@ class HuntingHouse
             'pool' => ['material_01', 'material_198']
         ];
 
-        $xp_gain   = $reward['xp'];
-        $gold_gain = $reward['gold'];
-
-        $awards = $this->awardXp($char, $xp_gain);
-        $new_xp = $awards['xp'];
-        $new_level = $awards['level'];
-        $level_up = $awards['level_up'];
-        $actual_xp_gain = $awards['xp_gain'];
-
-        $char->xp = $new_xp;
-        $char->level = $new_level;
-        $char->gold = (int) $char->gold + $gold_gain;
-
-        // Item rewards logic
-        $granted_items = [];
-        
-        // Random items from pool (Roll 3 times, same item allowed)
-        $pool = $reward['pool'];
-        for ($i = 0; $i < 3; $i++) {
-            $item_id = $pool[array_rand($pool)];
-            
-            // Determine category
-            $category = 'char_materials';
-            if (str_starts_with($item_id, 'wpn_')) $category = 'char_weapons';
-            elseif (str_starts_with($item_id, 'mat_') || str_starts_with($item_id, 'material_')) $category = 'char_materials';
-            
-            $char->addToInventory($category, $item_id, 1);
-            $granted_items[] = $item_id;
-        }
-
-        $char->save();
+        // Process reward using shared handler
+        $response = $this->awardReward($char, [
+            'xp'    => $reward['xp'],
+            'gold'  => $reward['gold'],
+            'rolls' => 3,
+            'pool'  => $reward['pool']
+        ]);
 
         // Update attempts
         $hh = $char->huntingHouse;
@@ -186,18 +163,7 @@ class HuntingHouse
             }
         }
 
-        return [
-            'status'   => 1,
-            'level'    => $new_level,
-            'xp'       => $new_xp,
-            'level_up' => $level_up,
-            'result'   => [
-                (string) $actual_xp_gain,
-                (string) $gold_gain,
-                $granted_items, // Sent list of granted items
-                $level_up,
-            ],
-        ];
+        return $response;
     }
 }
 

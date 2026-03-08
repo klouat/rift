@@ -16,7 +16,7 @@ class Character extends Model
         'equipped_clothing', 'equipped_hairstyle', 'equipped_skills',
         'char_talent_1', 'char_talent_2', 'char_talent_3',
         // Extras
-        'character_class', 'village_id', 'level_up_packages', 'welcome_claimed',
+        'character_class', 'village_id', 'level_up_packages', 'welcome_claimed', 'pet_id',
         // Attributes
         'atrrib_wind', 'atrrib_fire', 'atrrib_lightning', 'atrrib_water', 'atrrib_earth', 'atrrib_free',
         'ss_points', 'wt_spins', 'wt_total_spins', 'wt_today_spins', 'wt_last_spin', 'dr_day', 'dr_last_spin',
@@ -66,6 +66,11 @@ class Character extends Model
     public function eudemonGarden()
     {
         return $this->hasOne(CharacterEudemonGarden::class, 'char_id');
+    }
+
+    public function pets()
+    {
+        return $this->hasMany(Pet::class, 'char_id');
     }
 
     public function getRelationForColumn(string $column)

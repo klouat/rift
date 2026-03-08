@@ -113,7 +113,8 @@ class SystemLogin {
                     'face'       => 'face_01_' . $char->gender,
                     'hair_color' => $char->hair_style_color,
                     'skin_color' => $char->skin_color,
-                ]
+                ],
+                'pet_id' => (int) $char->pet_id
             ];
         }
 
@@ -138,6 +139,27 @@ class SystemLogin {
 
         if ($sessionkey && $char->user->sessionkey !== $sessionkey) {
              return ["status" => 2, "result" => "Session mismatch"];
+        }
+
+        $pet_data = [];
+        if ($char->pet_id > 0) {
+            $equipped_pet = \App\Models\Pet::find($char->pet_id);
+            if ($equipped_pet) {
+                $pet_data = [
+                    "pet_id"        => $equipped_pet->id,
+                    "pet_swf"       => $equipped_pet->pet_swf,
+                    "pet_name"      => $equipped_pet->pet_name,
+                    "pet_level"     => (int) $equipped_pet->pet_level,
+                    "pet_xp"        => (int) $equipped_pet->pet_xp,
+                    "pet_favorite"  => (bool) $equipped_pet->pet_favorite,
+                    "pet_mp"        => (int) $equipped_pet->pet_mp,
+                    "pet_skills"    => $equipped_pet->pet_skills,
+                    "arena_skills_learnt" => array_map('intval', explode(',', $equipped_pet->pet_skills ?? "1,0,0,0,0,0")),
+                    "pet_weapon"    => $equipped_pet->pet_weapon,
+                    "pet_back_item" => $equipped_pet->pet_back_item,
+                    "pet_emblem"    => (int) $equipped_pet->pet_emblem
+                ];
+            }
         }
             // Build the massive object that Character.as expects
             return [
@@ -230,7 +252,7 @@ class SystemLogin {
                     ["id" => 999875, "char_id" => (int)$char->id, "recruiter_id" => "npc_5", "amount" => 5],
                     ["id" => 999876, "char_id" => (int)$char->id, "recruiter_id" => "npc_6", "amount" => 5],
                 ],
-                "pet_data"   => [],
+                "pet_data"   => $pet_data,
                 "arena_data" => [
                     "char_id"         => (int) $char->id,
                     "stamina"         => 100,
