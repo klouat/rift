@@ -4,6 +4,7 @@ namespace App\Services;
 
 class AdvancedAcademyService
 {
+    use \App\Traits\SessionValidator;
     // Ordered skill group names per element (used by "skill_names" request)
     private const SKILL_NAMES = [
         'wind'     => ['evasion','blade_of_wind','wind_peace','dance_of_fujin','breakthrough','fujin_storm','shuriken_gourd','storm_boomerang','tornado_shield'],
@@ -147,9 +148,111 @@ class AdvancedAcademyService
 
     private function new_upgrade_skill(array $params): array
     {
+        $char_id          = (int)$params[0];
+        $sessionkey       = $params[1];
+        $element_type     = $params[2]; // e.g., "wind"
+        $group_name       = $params[3]; // e.g., "evasion"
+        $current_skill_id = $params[4];
+        $next_skill_id    = $params[5];
+        $current_level    = (int)$params[6]; // Index of current_skill_id in the chain
+        $forge_type       = $params[7]; // btn_upgrade, forgeBtn, instaForgeBtn
+
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof \App\Models\Character)) return $char;
+
+        // 1. Verify group and sequence
+        $tree = self::SKILL_TREE[$element_type][$group_name] ?? null;
+        if (!$tree) {
+            return ['status' => 0, 'result' => 'Invalid skill group.'];
+        }
+
+        // Verify current_skill_id is at current_level index
+        if (($tree[$current_level] ?? null) !== $current_skill_id) {
+            return ['status' => 0, 'result' => 'Skill sequence mismatch.'];
+        }
+
+        // next_skill_id should be at current_level + 1
+        $next_idx = $current_level + 1;
+        if (($tree[$next_idx] ?? null) !== $next_skill_id) {
+            return ['status' => 0, 'result' => 'Invalid next skill.'];
+        }
+
+        // 2. Identify the target skill and its properties
+        // We'll estimate token price based on the level index (next_idx)
+        // Level 1: 50, Level 2: 100, Level 3: 150...
+        $token_price = 50 * $next_idx;
+        if (str_contains($element_type, 'legendary')) {
+            $token_price *= 2; // Legendary skills cost double
+        }
+
+        $gold_cost = 10000 * pow(2, $current_level);
+        
+        $element_map = [
+            'wind' => 1, 'fire' => 2, 'thunder' => 3, 'earth' => 4, 'water' => 5,
+            'taijutsu' => 6, 'genjutsu' => 7, 'legendary_taijutsu' => 8, 'legendary_genjutsu' => 9
+        ];
+        $elt_idx = $element_map[$element_type] ?? 1;
+        
+        $pill_id     = 'essential_9' . $elt_idx;
+        $pill_amount = (int)floor($token_price / 50) + 1;
+
+        // 3. Process the upgrade based on forge type
+        if ($forge_type === 'btn_upgrade') {
+            if ($char->user->tokens < $token_price) {
+                return ['status' => 2, 'result' => 'Not enough tokens.'];
+            }
+            $char->user->tokens -= $token_price;
+            $char->user->save();
+        } 
+        elseif ($forge_type === 'forgeBtn') {
+            if ($char->gold < $gold_cost) {
+                return ['status' => 2, 'result' => 'Not enough gold.'];
+            }
+            if (!$char->hasInInventory('char_essentials', $pill_id, $pill_amount)) {
+                return ['status' => 2, 'result' => 'Not enough ' . $pill_id . ' pills.'];
+            }
+            $char->gold -= $gold_cost;
+            $char->removeFromInventory('char_essentials', $pill_id, $pill_amount);
+        } 
+        elseif ($forge_type === 'instaForgeBtn') {
+            // Check if user has free daily skill reward (element_learned == 0)
+            $today = now()->toDateString();
+            $can_free_upgrade = ($char->ed_skills_last_claim !== $today);
+
+            if ($can_free_upgrade) {
+                $char->ed_skills_last_claim = $today;
+            } else {
+                // Otherwise use Ancient Scroll
+                if (!$char->removeFromInventory('char_essentials', 'essential_07', 1)) {
+                    return ['status' => 2, 'result' => 'No free upgrades left today and no Secret Scroll of Wisdom in inventory.'];
+                }
+            }
+        } else {
+            return ['status' => 0, 'result' => 'Invalid upgrade method.'];
+        }
+
+        // 4. Update skills
+        // Remove old skill, add new skill
+        $char->removeFromInventory('char_skills', $current_skill_id);
+        $char->addToInventory('char_skills', $next_skill_id);
+        
+        // Also update equipped skills if it was equipped
+        $equipped = explode(',', $char->equipped_skills);
+        if (($key = array_search($current_skill_id, $equipped)) !== false) {
+            $equipped[$key] = $next_skill_id;
+            $char->equipped_skills = implode(',', $equipped);
+        }
+        
+        $char->save();
+
         return [
-            'status' => 2,
-            'result' => 'Skill upgrades are not available yet.',
+            'status'        => 1,
+            'result'        => 'Skill upgraded successful!',
+            'cost'          => $token_price,
+            'gold_cost'     => $gold_cost,
+            'pill_amt_data' => [$pill_id, $pill_amount],
+            'lastSkillId'   => $next_skill_id,
+            'skills'        => $char->equipped_skills // AS uses this to update both set and equipped
         ];
     }
 }

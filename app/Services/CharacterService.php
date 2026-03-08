@@ -92,7 +92,7 @@ class CharacterService {
             'atrrib_lightning'  => 0,
             'atrrib_water'      => 0,
             'atrrib_earth'      => 0,
-            'atrrib_free'       => 0 // Points usually given on level up.
+            'atrrib_free'       => 0 
         ]);
 
         return [

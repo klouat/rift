@@ -50,6 +50,7 @@ class AmfController extends Controller
                 'WishingTree'        => \App\Services\WishingTreeService::class,
                 'DailyRoulette'      => \App\Services\DailyRoulette::class,
                 'BlackMerchant'      => \App\Services\BlackMerchant::class,
+                'Event_Welcome'      => \App\Services\WelcomeEventService::class,
             ];
 
 

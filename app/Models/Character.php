@@ -16,7 +16,7 @@ class Character extends Model
         'equipped_clothing', 'equipped_hairstyle', 'equipped_skills',
         'char_talent_1', 'char_talent_2', 'char_talent_3',
         // Extras
-        'character_class', 'village_id', 'level_up_packages',
+        'character_class', 'village_id', 'level_up_packages', 'welcome_claimed',
         // Attributes
         'atrrib_wind', 'atrrib_fire', 'atrrib_lightning', 'atrrib_water', 'atrrib_earth', 'atrrib_free',
         'ss_points', 'wt_spins', 'wt_total_spins', 'wt_today_spins', 'wt_last_spin', 'dr_day', 'dr_last_spin',
@@ -56,6 +56,16 @@ class Character extends Model
     public function senjutsuSkills()
     {
         return $this->hasMany(CharacterSenjutsuSkill::class, 'character_id');
+    }
+
+    public function huntingHouse()
+    {
+        return $this->hasOne(CharacterHuntingHouse::class, 'char_id');
+    }
+
+    public function eudemonGarden()
+    {
+        return $this->hasOne(CharacterEudemonGarden::class, 'char_id');
     }
 
     public function getRelationForColumn(string $column)
@@ -200,5 +210,11 @@ class Character extends Model
             $item->save();
         }
         return true;
+    }
+    public function hasInInventory(string $column, string $id, int $qty = 1): bool
+    {
+        $id_col = in_array($column, ['char_skills', 'char_talent_skills', 'char_senjutsu_skills']) ? 'skill_id' : 'item_id';
+        $item = $this->getRelationForColumn($column)->where($id_col, $id)->first();
+        return $item && $item->quantity >= $qty;
     }
 }
