@@ -23,6 +23,12 @@ class PetService
         ['swf' => 'pet_karasu_tengu', 'cost' => 'token_500', 'name' => 'Karasu Tengu'],
     ];
 
+    private $lighting_pet_shop_list = [
+        ['swf' => 'pet_lightning_fox', 'cost' => 'token_500', 'name' => 'Lightning Fox'],
+        ['swf' => 'pet_storm_dragon', 'cost' => 'token_800', 'name' => 'Storm Dragon'],
+        ['swf' => 'pet_thunder_bird', 'cost' => 'token_1000', 'name' => 'Thunder Bird'],
+    ];
+
     /**
      * PetService uses a generic executeService wrapper.
      */
@@ -48,13 +54,27 @@ class PetService
         ];
     }
 
+    public function getLightingPetShopData($char_id, $sessionkey)
+    {
+        $swfs = array_column($this->lighting_pet_shop_list, 'swf');
+        $costs = array_column($this->lighting_pet_shop_list, 'cost');
+
+        return [
+            'status' => 1,
+            'pets' => $swfs,
+            'pets_cost' => $costs
+        ];
+    }
+
     public function buyPet($char_id, $sessionkey, $pet_swf)
     {
         $char = Character::find((int) $char_id);
         if (!$char) return ['status' => 0, 'error' => 'Character not found'];
 
         $shop_item = null;
-        foreach ($this->pet_shop_list as $item) {
+        $all_shop_pets = array_merge($this->pet_shop_list, $this->lighting_pet_shop_list);
+        
+        foreach ($all_shop_pets as $item) {
             if ($item['swf'] === $pet_swf) {
                 $shop_item = $item;
                 break;

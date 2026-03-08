@@ -98,12 +98,6 @@ class SystemLogin {
                 'character_talent_1' => $char->char_talent_1 ?? "",
                 'character_talent_2' => $char->char_talent_2 ?? "",
                 'character_talent_3' => $char->char_talent_3 ?? "",
-                'character_hp' => (int) $char->hp,
-                'character_cp' => (int) $char->cp,
-                'character_agility' => (int) $char->agility,
-                'character_dodge' => (int) $char->dodge,
-                'character_critical' => (int) $char->critical,
-                'character_purify' => (int) $char->purify,
                 'character_gold' => $char->gold,
                 'character_tp' => $char->tp,
                 'character_class' => $char->character_class,
@@ -127,17 +121,17 @@ class SystemLogin {
         ];
     }
 
-    public function getCharacterData($char_id, $sessionkey_or_type, $type="self") {
-        // Handle different call signatures from client
-        $sessionkey = ($type === "self") ? $sessionkey_or_type : null;
-
+    public function getCharacterData($char_id, $session_or_type, $type = "self") {
         $char = Character::with('user')->find((int)$char_id);
-        
-        if (!$char) {
-             return ["status" => 0, "error" => "Character not found."];
-        }
+        if (!$char) return ["status" => 0, "error" => "Character not found."];
 
-        if ($sessionkey && $char->user->sessionkey !== $sessionkey) {
+        // The client often calls [char_id, sessionkey] OR [char_id, "arena_info"] OR [char_id, "recruit"]
+        // If it's a "self" call, the second arg is the sessionkey.
+        // If it's not a self call (arena_info/recruit), we don't strictly needs sessionkey but we might want to log it.
+        
+        $is_self = ($session_or_type !== "arena_info" && $session_or_type !== "recruit" && $type === "self");
+        
+        if ($is_self && $char->user->sessionkey !== $session_or_type) {
              return ["status" => 2, "result" => "Session mismatch"];
         }
 
@@ -190,12 +184,6 @@ class SystemLogin {
                     "character_talent_1"   => $char->char_talent_1 ?: null,
                     "character_talent_2"   => $char->char_talent_2 ?: null,
                     "character_talent_3"   => $char->char_talent_3 ?: null,
-                    "character_hp"         => (int) $char->hp,
-                    "character_cp"         => (int) $char->cp,
-                    "character_agility"    => (int) $char->agility,
-                    "character_dodge"      => (int) $char->dodge,
-                    "character_critical"   => (int) $char->critical,
-                    "character_purify"     => (int) $char->purify,
                     "character_gold"       => (string) $char->gold,
                     "character_tp"         => (int) ($char->tp ?? 0),
                     "character_class"      => (string) ($char->character_class ?? ""),
@@ -253,17 +241,42 @@ class SystemLogin {
                     ["id" => 999876, "char_id" => (int)$char->id, "recruiter_id" => "npc_6", "amount" => 5],
                 ],
                 "pet_data"   => $pet_data,
-                "arena_data" => [
-                    "char_id"         => (int) $char->id,
-                    "stamina"         => 100,
-                    "max_stamina"     => 100,
-                    "village_id"      => (int) ($char->village_id ?? 4),
-                    "trophies"        => 0,
-                    "enemy_id"        => -1,
-                    "first_open"      => 1,
-                    "village_changed" => 0,
-                    "arena_hash"      => "f35ce247e15061487a28c8836822852ebe13874a032c3800e65e7d9acbb0802a"
-                ]
+                "arena_data" => $this->getArenaData($char)
             ];
+    }
+
+    private function getArenaData($char) {
+        $arena = $char->arena;
+        if (!$arena) {
+            $arena = \App\Models\CharacterArena::create([
+                'char_id' => $char->id,
+                'stamina' => 100,
+                'max_stamina' => 100,
+                'trophies' => 0,
+                'enemy_id' => -1,
+                'first_open' => 1,
+            ]);
+        }
+
+        // If no enemy assigned, pick a random one that is NOT the player
+        if ($arena->enemy_id == -1) {
+            $enemy = Character::where('id', '!=', $char->id)->inRandomOrder()->first();
+            if ($enemy) {
+                $arena->enemy_id = $enemy->id;
+                $arena->save();
+            }
+        }
+
+        return [
+            "char_id"         => (int) $char->id,
+            "stamina"         => (int) $arena->stamina,
+            "max_stamina"     => (int) $arena->max_stamina,
+            "village_id"      => (int) ($char->village_id ?? 4),
+            "trophies"        => (int) $arena->trophies,
+            "enemy_id"        => (int) $arena->enemy_id,
+            "first_open"      => (int) $arena->first_open,
+            "village_changed" => (int) $arena->village_changed,
+            "arena_hash"      => md5($char->id . "arena_secret")
+        ];
     }
 }

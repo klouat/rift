@@ -22,8 +22,8 @@ foreach ($libraries as $lib) {
         Route::get('/skillLibrary', [\App\Http\Controllers\SkillLibraryController::class, 'index']);
         continue;
     }
-    if ($lib === 'petInfo') {
-        Route::get('/petInfo', [\App\Http\Controllers\PetInfoController::class, 'getPetInfo']);
+    if ($lib === 'petInfo' || $lib === 'arenaPetInfo') {
+        Route::get('/' . $lib, [\App\Http\Controllers\PetInfoController::class, 'getPetInfo']);
         continue;
     }
     if ($lib === 'petSkillInfo') {

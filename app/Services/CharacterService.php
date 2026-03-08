@@ -388,28 +388,216 @@ class CharacterService {
 
         $gender_suffix = ((int)$gender == 0) ? '0' : '1';
 
-        $all_sets = ['set_01_0', 'set_01_1', 'set_02_0', 'set_02_1', 'set_03_0', 'set_03_1'];
-        $all_hairs = ['hair_01_0', 'hair_01_1', 'hair_02_0', 'hair_02_1', 'hair_03_0', 'hair_03_1'];
+        $all_items = \App\Models\ShopItem::all();
+        
+        $weaponArray = [];
+        $backArray = [];
+        $accArray = [];
+        $setArray = [];
+        $hairArray = [];
+        $itemsArray = [];
+        $essentialsArray = [];
+        $materialsArray = [];
 
-        $setArray = array_values(array_filter($all_sets, function($item) use ($gender_suffix) {
-            return str_ends_with($item, '_' . $gender_suffix);
-        }));
-
-        $hairArray = array_values(array_filter($all_hairs, function($item) use ($gender_suffix) {
-            return str_ends_with($item, '_' . $gender_suffix);
-        }));
+        foreach ($all_items as $item) {
+            $itemId = $item->item_id;
+            switch ($item->item_type) {
+                case 'weapon':
+                    $weaponArray[] = $itemId;
+                    break;
+                case 'back':
+                    $backArray[] = $itemId;
+                    break;
+                case 'accessory':
+                    $accArray[] = $itemId;
+                    break;
+                case 'set':
+                    if (preg_match('/_[01]$/', $itemId)) {
+                        if (str_ends_with($itemId, '_' . $gender_suffix)) {
+                            $setArray[] = $itemId;
+                        }
+                    } else {
+                        $setArray[] = $itemId . '_' . $gender_suffix;
+                    }
+                    break;
+                case 'hair':
+                    if (preg_match('/_[01]$/', $itemId)) {
+                        if (str_ends_with($itemId, '_' . $gender_suffix)) {
+                            $hairArray[] = $itemId;
+                        }
+                    } else {
+                        $hairArray[] = $itemId . '_' . $gender_suffix;
+                    }
+                    break;
+                case 'item':
+                    $itemsArray[] = $itemId;
+                    break;
+                case 'essential':
+                    $essentialsArray[] = $itemId;
+                    break;
+                case 'material':
+                    $materialsArray[] = $itemId;
+                    break;
+            }
+        }
 
         return [
             'status' => 1,
-            'weaponArray' => ['wpn_01', 'wpn_02', 'wpn_03', 'wpn_04', 'wpn_05'],
-            'backArray' => ['back_01', 'back_02', 'back_03'],
-            'accArray' => ['accessory_01', 'accessory_02', 'accessory_03'],
+            'weaponArray' => $weaponArray,
+            'backArray' => $backArray,
+            'accArray' => $accArray,
             'setArray' => $setArray,
             'hairArray' => $hairArray,
-            'itemsArray' => [],
-            'essentialsArray' => [],
-            'materialsArray' => [],
+            'itemsArray' => $itemsArray,
+            'essentialsArray' => $essentialsArray,
+            'materialsArray' => $materialsArray,
         ];
+    }
+
+    /**
+     * buyItem — buys an item from the shop.
+     */
+    public function buyItem($char_id, $sessionkey, $item_id, $quantity = 1): array
+    {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
+        $user = $char->user;
+
+        if (str_starts_with($item_id, 'wpn_')) {
+            $column = 'char_weapons';
+        } elseif (str_starts_with($item_id, 'back_')) {
+            $column = 'char_back_items';
+        } elseif (str_starts_with($item_id, 'accessory_')) {
+            $column = 'char_accessories';
+        } elseif (str_starts_with($item_id, 'set_')) {
+            $column = 'char_sets';
+        } elseif (str_starts_with($item_id, 'hair_')) {
+            $column = 'char_hairs';
+        } elseif (str_starts_with($item_id, 'item_') || str_starts_with($item_id, 'material_') || str_starts_with($item_id, 'scroll_')) {
+            $column = 'char_materials';
+        } elseif (str_starts_with($item_id, 'essential_')) {
+            $column = 'char_essentials';
+        } else {
+            return ['status' => 0, 'error' => 'Unknown item type.'];
+        }
+
+        $is_stackable = in_array($column, ['char_materials', 'char_essentials']);
+
+        if (!$is_stackable && $char->hasInInventory($column, $item_id)) {
+            return ['status' => 2]; // Already owns this item.
+        }
+
+        $itemData = $this->getLibraryItem($item_id);
+        if (!$itemData) {
+            return ['status' => 0, 'error' => 'Item not found in library.'];
+        }
+
+        if (isset($itemData['item_level']) && $char->level < (int)$itemData['item_level']) {
+            return ['status' => 5]; // Level not high enough
+        }
+
+        $priceGold = ($itemData['item_price_gold'] ?? 0) * $quantity;
+        $priceTokens = ($itemData['item_price_tokens'] ?? 0) * $quantity;
+
+        if ($char->gold < $priceGold || (isset($user) && $user->tokens < $priceTokens)) {
+            return ['status' => 3]; // You do not have enough resources
+        }
+
+        $char->addToInventory($column, $item_id, $quantity);
+        
+        if ($priceGold > 0) {
+            $char->gold -= $priceGold;
+            $char->save();
+        }
+        
+        if ($priceTokens > 0 && isset($user)) {
+            $user->tokens -= $priceTokens;
+            $user->save();
+        }
+
+        // Return updated values
+        return [
+            'status' => 1,
+            'data' => [
+                'character_gold' => (string) $char->gold,
+                'account_tokens' => (int) ($user->tokens ?? 0)
+            ]
+        ];
+    }
+
+    /**
+     * sellItem — sells an item to the shop.
+     */
+    public function sellItem($char_id, $sessionkey, $item_id, $quantity = 1): array
+    {
+        $char = $this->validateSession($char_id, $sessionkey);
+        if (!($char instanceof Character)) return $char;
+
+        $user = $char->user;
+
+        if (str_starts_with($item_id, 'wpn_')) {
+            $column = 'char_weapons';
+        } elseif (str_starts_with($item_id, 'back_')) {
+            $column = 'char_back_items';
+        } elseif (str_starts_with($item_id, 'accessory_')) {
+            $column = 'char_accessories';
+        } elseif (str_starts_with($item_id, 'set_')) {
+            $column = 'char_sets';
+        } elseif (str_starts_with($item_id, 'hair_')) {
+            $column = 'char_hairs';
+        } elseif (str_starts_with($item_id, 'item_') || str_starts_with($item_id, 'material_') || str_starts_with($item_id, 'scroll_')) {
+            $column = 'char_materials';
+        } elseif (str_starts_with($item_id, 'essential_')) {
+            $column = 'char_essentials';
+        } else {
+            return ['status' => 0, 'error' => 'Unknown item type.'];
+        }
+
+        if (!$char->hasInInventory($column, $item_id, $quantity)) {
+            return ['status' => 2]; // You do not own this item
+        }
+
+        $itemData = $this->getLibraryItem($item_id);
+        if (!$itemData || !(isset($itemData['item_sellable']) && $itemData['item_sellable'])) {
+            return ['status' => 0, 'error' => 'Item cannot be sold.'];
+        }
+
+        $price = ($itemData['item_sell_price'] ?? 0) * $quantity;
+
+        $char->removeFromInventory($column, $item_id, $quantity);
+        if ($price > 0) {
+            $char->gold += $price;
+        }
+        $char->save();
+
+        return [
+            'status' => 1,
+            'data' => [
+                'character_gold' => (string) $char->gold,
+                'account_tokens' => (int) ($user->tokens ?? 0)
+            ]
+        ];
+    }
+    
+    private function getLibraryItem(string $item_id)
+    {
+        $library = cache()->remember('game_library_json', 3600, function () {
+            $path = base_path('library.json');
+            if (file_exists($path)) {
+                $content = json_decode(file_get_contents($path), true);
+                if (isset($content['savedLibrary'])) {
+                    $lookup = [];
+                    foreach ($content['savedLibrary'] as $i) {
+                        $lookup[$i['item_id']] = $i['effects'] ?? [];
+                    }
+                    return $lookup;
+                }
+            }
+            return [];
+        });
+
+        return $library[$item_id] ?? null;
     }
 
     /**

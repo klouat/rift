@@ -10,7 +10,7 @@ class Character extends Model
         'account_id', 'name', 'level', 'gold', 'profile_pic',
         'gender', 'element', 'element_2', 'element_3', 'element_4', 'element_5', 'hair_style_color', 'hair_num', 'skin_color',
         // Stats
-         'xp', 'rank', 'hp', 'cp', 'tp', 'agility', 'dodge', 'critical', 'purify',
+         'xp', 'rank', 'tp',
         // Equipped Slots
         'equipped_weapon', 'equipped_back_item', 'equipped_accessory', 
         'equipped_clothing', 'equipped_hairstyle', 'equipped_skills',
@@ -66,6 +66,11 @@ class Character extends Model
     public function eudemonGarden()
     {
         return $this->hasOne(CharacterEudemonGarden::class, 'char_id');
+    }
+
+    public function arena()
+    {
+        return $this->hasOne(CharacterArena::class, 'char_id');
     }
 
     public function pets()
