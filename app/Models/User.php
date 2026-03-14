@@ -23,7 +23,11 @@ class User extends Authenticatable
         'password',
         'tokens',
         'account_type',
-        'sessionkey'
+        'sessionkey',
+        'is_banned',
+        'ban_type',
+        'ban_reason',
+        'ban_until',
     ];
 
     /**
@@ -46,6 +50,8 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password'          => 'hashed',
+            'is_banned'         => 'boolean',
+            'ban_until'         => 'datetime',
         ];
     }
 

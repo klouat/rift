@@ -19,6 +19,13 @@ return new class extends Migration
             $table->string('password');
             $table->rememberToken();
             $table->timestamps();
+            $table->integer('account_type')->default(0);
+            $table->integer('tokens')->default(0);
+            $table->string('sessionkey')->nullable()->index();
+            $table->boolean('is_banned')->default(false)->index();
+            $table->string('ban_type')->nullable();
+            $table->string('ban_reason')->nullable();
+            $table->timestamp('ban_until')->nullable();
         });
 
         Schema::create('password_reset_tokens', function (Blueprint $table) {

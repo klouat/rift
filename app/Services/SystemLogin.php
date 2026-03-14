@@ -39,6 +39,22 @@ class SystemLogin {
             return ["status" => 2]; // wrong credentials
         }
 
+        // Ban check
+        if ($user->is_banned) {
+            $banType = $user->ban_type ?? '';
+            $banReason = $user->ban_reason ?? '';
+            $banUntil = $user->ban_until ? $user->ban_until->toDateTimeString() : null;
+            return [
+                "status" => 0,
+                "ban_info" => [
+                    "ban_type"   => $banType,
+                    "reason"     => $banReason,
+                    "message"    => $banReason,
+                    "punishment" => $banUntil,
+                ]
+            ];
+        }
+
         $sessionkey = md5(time() . Str::random(10) . $username);
         $user->sessionkey = $sessionkey;
         $user->save();
