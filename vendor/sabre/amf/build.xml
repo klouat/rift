@@ -1,0 +1,103 @@
+<?xml version="1.0"?>
+<project name="SabreAMF" default="dist" basedir=".">
+
+    <property name="BUILDDIR" value="build/" />
+    <svnlastrevision workingcopy="." propertyname="svn.lastrevision"/>
+
+    <fileset dir="${BUILDDIR}" id="pkgfiles">
+        <include name="*.php" />
+        <include name="**/*.php" />
+        <include name="README" />
+        <include name="LICENCE" />
+        <include name="ChangeLog" />
+    </fileset>
+
+
+    <target name="prepare">
+        <echo msg="Preparing build.." />
+        <mkdir dir="${BUILDDIR}" />
+        <copy file="LICENCE" todir="${BUILDDIR}" />
+        <copy file="README" todir="${BUILDDIR}" />
+        <copy file="ChangeLog" todir="${BUILDDIR}" />
+    </target>
+
+    <target name="build" depends="prepare">
+         <echo msg="Copying source files" />
+         <mkdir dir="${BUILDDIR}" />
+         <copy todir="${BUILDDIR}">
+            <fileset dir="SabreAMF/">
+                <include name="*.php" />
+                <include name="AMF0/*.php" />
+                <include name="AMF3/*.php" />
+            </fileset>
+        </copy>
+    </target>
+
+    <target name="buildexamples" depends="prepare">
+        <echo msg="Copying examples" />
+        <mkdir dir="${BUILDDIR}/examples" />
+        <copy todir="${BUILDDIR}/examples">
+            <fileset dir="examples/">
+                <include name="*.php" />
+            </fileset>
+        </copy>
+    </target>
+
+    <target name="textfiles" depends="prepare">
+        <echo msg="Copying textfiles" />
+        <copy todir="${BUILDDIR}" file="README" />
+        <copy todir="${BUILDDIR}" file="LICENCE" />
+        <copy todir="${BUILDDIR}" file="ChangeLog" />
+    </target>
+
+    <target name="package" depends="build, pearpkg">
+        <echo msg="packaging" />
+    </target>
+
+    <target name="pearpkg" depends="prepare, build, buildexamples">
+        <pearpkg name="SabreAMF" dir="${BUILDDIR}" destFile="${BUILDDIR}/package.xml">
+            <fileset refid="pkgfiles" />
+            <option name="notes">Stable release.</option>
+            <option name="description">SabreAMF is a Flash Remoting server/client. SabreAMF supports both the AMF0 and AMF3 protocols</option>
+            <option name="summary">SabreAMF is a Flash Remoting server/client, supporting AMF0 and AMF3 protocols</option>
+            <option name="version" value="1.3.${svn.lastrevision}" />
+            <option name="state" value="stable" />
+            <option name="licence" value="BSD" />
+            <mapping name="maintainers">
+                <element>
+                    <element key="handle" value="evert" />
+                    <element key="name" value="Evert Pot" />
+                    <element key="email" value="evert@rooftopsolutions.nl" />
+                    <element key="role" value="lead" />
+                </element>
+             </mapping>
+             <mapping name="deps">
+                <element>
+                    <element key="type" value="php" />
+                    <element key="version" value="5.2.0" />
+                    <element key="rel" value="ge" />
+                </element>
+             </mapping>
+             <mapping name="exceptions">
+                <element key="ChangeLog" value="doc" />
+                <element key="README" value="doc" />
+                <element key="LICENCE" value="doc" />
+             </mapping>
+         </pearpkg>
+    </target>
+
+    <target name="documentation" depends="prepare">
+        <phpdoc title="SabreAMF API Documentation" destdir="build/apidocs" sourcepath="SabreAMF/" output="HTML:frames:default" />
+    </target>
+
+    <target name="dist" depends="build, buildexamples, textfiles, pearpkg">
+        <echo msg="Creating full featured SabreAMF package" />
+    </target>
+
+    <target name="clean">
+        <echo msg="Removing build files (cleaning up distribution)" />
+        <delete dir="build/" />
+        <delete dir="apidocs" />
+    </target>
+
+</project>
